@@ -1,0 +1,24 @@
+{
+  "color": {
+    "background": { "value": "#0B0E14", "type": "color" },
+    "surface": { "value": "#151A23", "type": "color" },
+    "text": { "value": "#E6EAF2", "type": "color" },
+    "muted": { "value": "#8A94A6", "type": "color" },
+    "accent": { "value": "#4F8CFF", "type": "color" },
+    "positive": { "value": "#3FB984", "type": "color" },
+    "negative": { "value": "#FF5C5C", "type": "color" }
+  },
+  "spacing": {
+    "xs": { "value": "4", "type": "spacing" },
+    "sm": { "value": "8", "type": "spacing" },
+    "md": { "value": "16", "type": "spacing" },
+    "lg": { "value": "24", "type": "spacing" }
+  },
+  "radius": {
+    "card": { "value": "16", "type": "borderRadius" }
+  },
+  "typography": {
+    "balance": { "value": "32", "type": "fontSizes" },
+    "body": { "value": "15", "type": "fontSizes" }
+  }
+}
