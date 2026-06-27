@@ -1,4 +1,4 @@
-import type { Llm } from "../anthropic.js";
+import type { Llm } from "../llm.js";
 import type { Blackboard } from "../blackboard.js";
 import { ReviewResultSchema, type ReviewResult } from "../schemas.js";
 import { log } from "../util/log.js";

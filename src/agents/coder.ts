@@ -1,4 +1,4 @@
-import type { Llm } from "../anthropic.js";
+import type { Llm } from "../llm.js";
 import type { Blackboard } from "../blackboard.js";
 import { parseFileBlocks } from "../util/fileblocks.js";
 import { log } from "../util/log.js";

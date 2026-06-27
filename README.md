@@ -5,8 +5,10 @@ feature spec (and, optionally, exported Figma design tokens) and a chain of
 specialized AI agents takes it from **design → plan → code → tests → review →
 deploy gate** with minimal human intervention.
 
-Built with **TypeScript** and the **Anthropic Claude API** (`claude-opus-4-8`,
-adaptive thinking, structured outputs). This is a clean-room reference
+Built with **TypeScript**. It runs against **any of three LLM providers** —
+**Claude (Anthropic)**, **ChatGPT (OpenAI)**, or **Gemini (Google)** — behind a
+single provider interface, and ships with both a **CLI** and a **web interface**
+where users bring their own API key. This is a clean-room reference
 implementation of a production agentic SDLC system.
 
 > **Status:** reference implementation. The deploy agent writes approved
@@ -37,6 +39,20 @@ that also enforces a run-wide **token budget** — a runaway agent can't burn
 unbounded tokens. The orchestrator (`src/pipeline.ts`) detects unresolved review
 loops and stops after `--max-rounds`.
 
+### Providers
+
+Every LLM call goes through the `Llm` facade (`src/llm.ts`), which delegates to a
+provider implementing a small interface (`src/providers/types.ts`). The facade
+owns the cross-provider concerns (budget guard, Zod↔JSON-Schema conversion,
+usage accounting, schema validation), so agents never change when you switch
+providers.
+
+| Provider | Key | `structured()` | `generate()` |
+|----------|-----|----------------|--------------|
+| Claude (Anthropic) | `ANTHROPIC_API_KEY` | forced tool use | streamed messages |
+| ChatGPT (OpenAI) | `OPENAI_API_KEY` | forced function tool | streamed chat completions |
+| Gemini (Google) | `GEMINI_API_KEY` | JSON mode + `responseSchema` | `generateContentStream` |
+
 | Agent | File | Responsibility | Claude call |
 |-------|------|----------------|-------------|
 | Planner | `src/agents/planner.ts` | Decompose into component tree, typed API contracts, and a file list | structured output (Zod) |
@@ -49,14 +65,19 @@ loops and stops after `--max-rounds`.
 
 ```bash
 npm install
-cp .env.example .env        # add your ANTHROPIC_API_KEY
+cp .env.example .env        # add the key for your chosen provider
 
-# Run the full pipeline on the bundled example
+# Run the full pipeline on the bundled example (Claude by default)
 npm run dev -- run \
   --feature examples/feature.md \
   --design examples/design-tokens.json \
   --conventions examples/conventions.md \
   --out out
+
+# Use a different provider
+ASDLC_PROVIDER=openai OPENAI_API_KEY=sk-... npm run dev -- run -f examples/feature.md
+# …or pass it inline
+npm run dev -- run -f examples/feature.md --provider gemini --api-key "$GEMINI_API_KEY"
 ```
 
 Build and run the compiled CLI:
@@ -76,10 +97,38 @@ asdlc run --feature <path> [options]
   -c, --conventions <path>   repo conventions file
   -o, --out <dir>            output directory (default: "out")
   -r, --max-rounds <n>       max review→fix rounds (default: 2)
+  -p, --provider <id>        anthropic | openai | gemini (default: anthropic)
+  -m, --model <id>           model id (defaults to the provider's best model)
+  -k, --api-key <key>        API key (falls back to the provider env var)
 ```
 
 The process exits `0` when the deploy gate is green, non-zero otherwise — so it
 drops straight into a CI job.
+
+## Web interface
+
+A browser UI lets a user pick a provider, paste **their own** API key, supply
+the feature/design/conventions inputs, and watch the pipeline run live (phase
+timeline, token usage vs budget, the review verdict, and the generated files to
+view/download).
+
+```bash
+# 1. Build the backend and start the API + static server (default :3001)
+npm run build
+npm run server
+
+# 2. In another terminal, run the frontend dev server (default :5173, proxies /api)
+cd web
+npm install
+npm run dev
+```
+
+For a single-process production setup, build the frontend (`cd web && npm run
+build`) and the Express server will serve `web/dist` directly on `:3001`.
+
+> **Key handling:** the API key is sent with each run request, held only in
+> memory for that run, and **never written to disk, logged, or echoed back** in
+> any progress event or error. Closing the tab discards it.
 
 ## How it works
 
@@ -99,9 +148,11 @@ drops straight into a CI job.
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
-| `ANTHROPIC_API_KEY` | — | required |
-| `ASDLC_MODEL` | `claude-opus-4-8` | model id |
+| `ASDLC_PROVIDER` | `anthropic` | `anthropic` \| `openai` \| `gemini` |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | — | key for the selected provider (CLI only) |
+| `ASDLC_MODEL` | per-provider best | model id override |
 | `ASDLC_TOKEN_BUDGET` | `200000` | abort the run if cumulative tokens exceed this |
+| `PORT` | `3001` | web server port |
 
 ## License
 

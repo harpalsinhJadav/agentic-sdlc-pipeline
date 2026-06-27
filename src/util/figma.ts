@@ -38,3 +38,17 @@ export function parseDesignTokens(raw: unknown): DesignBrief {
 
   return { summary, tokens };
 }
+
+/** Flatten a DesignBrief into the prompt-ready summary the planner consumes. */
+export function buildDesignSummary(design: DesignBrief): string {
+  return (
+    design.summary +
+    (Object.keys(design.tokens).length
+      ? "\nTokens:\n" +
+        Object.entries(design.tokens)
+          .slice(0, 60)
+          .map(([k, v]) => `  ${k}: ${v}`)
+          .join("\n")
+      : "")
+  );
+}

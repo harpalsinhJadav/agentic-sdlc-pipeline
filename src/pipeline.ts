@@ -1,6 +1,9 @@
-import { Llm } from "./anthropic.js";
+import { Llm } from "./llm.js";
 import { Blackboard } from "./blackboard.js";
 import type { Config } from "./config.js";
+import type { EventSink } from "./events.js";
+import type { GeneratedFile } from "./blackboard.js";
+import type { TechnicalPlan } from "./schemas.js";
 import { runPlanner } from "./agents/planner.js";
 import { runCoder } from "./agents/coder.js";
 import { runTester } from "./agents/tester.js";
@@ -15,6 +18,8 @@ export interface PipelineInput {
   outDir: string;
   /** Max review→fix loops before giving up (loop-detection circuit breaker). */
   maxReviewRounds: number;
+  /** Optional progress sink. The CLI leaves it unset; the web server streams it. */
+  onEvent?: EventSink;
 }
 
 export interface PipelineResult {
@@ -22,6 +27,8 @@ export interface PipelineResult {
   deployed: boolean;
   rounds: number;
   totalTokens: number;
+  plan?: TechnicalPlan;
+  generatedFiles: GeneratedFile[];
 }
 
 /**
@@ -39,6 +46,7 @@ export async function runPipeline(
   cfg: Config,
   input: PipelineInput,
 ): Promise<PipelineResult> {
+  const emit = input.onEvent ?? (() => {});
   const board = new Blackboard(
     input.featureRequest,
     input.designSummary,
@@ -47,21 +55,53 @@ export async function runPipeline(
   );
   const llm = new Llm(cfg, board);
 
+  const emitUsage = () => emit({ type: "usage", ...board.usageSnapshot() });
+
   log.banner("PLAN");
-  await runPlanner(llm, board);
+  emit({ type: "phase", phase: "plan", message: "Decomposing the request into a technical plan…" });
+  const plan = await runPlanner(llm, board);
+  emit({
+    type: "plan",
+    title: plan.title,
+    components: plan.componentTree.length,
+    apiContracts: plan.apiContracts.length,
+    files: plan.files.length,
+  });
   board.printUsage();
+  emitUsage();
 
   log.banner("BUILD");
+  emit({ type: "phase", phase: "build", message: "Generating source and tests…" });
   await runCoder(llm, board);
+  emit({ type: "files", kind: "source", paths: filePaths(board.files, "source") });
   await runTester(llm, board);
+  emit({ type: "files", kind: "test", paths: filePaths(board.files, "test") });
   board.printUsage();
+  emitUsage();
 
   let approved = false;
   let round = 0;
   for (round = 1; round <= input.maxReviewRounds; round++) {
     log.banner(`REVIEW (round ${round}/${input.maxReviewRounds})`);
+    emit({
+      type: "phase",
+      phase: "review",
+      round,
+      message: `Automated PR review (round ${round}/${input.maxReviewRounds})…`,
+    });
     const review = await runReviewer(llm, board);
+    const blockers = review.findings.filter(
+      (f) => f.severity === "blocker" || f.severity === "major",
+    ).length;
+    emit({
+      type: "review",
+      approved: review.approved,
+      summary: review.summary,
+      blockers,
+      findings: review.findings,
+    });
     board.printUsage();
+    emitUsage();
 
     if (review.approved) {
       approved = true;
@@ -74,18 +114,42 @@ export async function runPipeline(
 
     // Feed the findings back to the coder + tester for a fix pass.
     log.banner(`FIX (round ${round})`);
+    emit({ type: "phase", phase: "fix", round, message: `Applying review fixes (round ${round})…` });
     const findings = review.findings
       .map((f) => `- [${f.severity}/${f.category}] ${f.file}: ${f.message} → ${f.suggestion}`)
       .join("\n");
     await applyFixes(llm, board, findings);
     board.printUsage();
+    emitUsage();
   }
 
   log.banner("DEPLOY");
+  emit({ type: "phase", phase: "deploy", message: approved ? "Writing approved artifacts…" : "Review not approved — deploy skipped." });
   const deployed = approved ? await runDeployer(board, input.outDir) : false;
   if (!approved) log.fail("not approved — deploy skipped.");
 
-  return { approved, deployed, rounds: round, totalTokens: board.totalTokens };
+  const result: PipelineResult = {
+    approved,
+    deployed,
+    rounds: round,
+    totalTokens: board.totalTokens,
+    plan: board.plan,
+    generatedFiles: board.files,
+  };
+  emit({
+    type: "done",
+    approved,
+    deployed,
+    rounds: round,
+    totalTokens: board.totalTokens,
+    plan: board.plan,
+    generatedFiles: board.files,
+  });
+  return result;
+}
+
+function filePaths(files: GeneratedFile[], kind: GeneratedFile["kind"]): string[] {
+  return files.filter((f) => f.kind === kind).map((f) => f.path);
 }
 
 /** Re-run the coder + tester with the reviewer's findings as guidance. */

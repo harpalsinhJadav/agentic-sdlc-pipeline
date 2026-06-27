@@ -1,4 +1,5 @@
 import type { TechnicalPlan, ReviewResult } from "./schemas.js";
+import type { NormalizedUsage } from "./providers/types.js";
 import { log } from "./util/log.js";
 
 export interface GeneratedFile {
@@ -6,13 +7,6 @@ export interface GeneratedFile {
   contents: string;
   /** "source" | "test" — used by the reviewer and the deploy gate. */
   kind: "source" | "test";
-}
-
-interface UsageLike {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number | null;
-  cache_creation_input_tokens?: number | null;
 }
 
 /**
@@ -36,16 +30,24 @@ export class Blackboard {
     private budget: number,
   ) {}
 
-  recordUsage(usage: UsageLike | undefined) {
+  recordUsage(usage: NormalizedUsage | undefined) {
     if (!usage) return;
-    this.inputTokens += usage.input_tokens ?? 0;
-    this.inputTokens += usage.cache_read_input_tokens ?? 0;
-    this.inputTokens += usage.cache_creation_input_tokens ?? 0;
-    this.outputTokens += usage.output_tokens ?? 0;
+    this.inputTokens += usage.inputTokens ?? 0;
+    this.outputTokens += usage.outputTokens ?? 0;
   }
 
   get totalTokens(): number {
     return this.inputTokens + this.outputTokens;
+  }
+
+  /** Serialisable token snapshot for progress events. */
+  usageSnapshot() {
+    return {
+      inputTokens: this.inputTokens,
+      outputTokens: this.outputTokens,
+      totalTokens: this.totalTokens,
+      budget: this.budget,
+    };
   }
 
   assertWithinBudget() {

@@ -5,7 +5,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { loadConfig } from "./config.js";
 import { runPipeline } from "./pipeline.js";
-import { parseDesignTokens } from "./util/figma.js";
+import { parseDesignTokens, buildDesignSummary } from "./util/figma.js";
 import { readJson, readTextIfExists } from "./util/files.js";
 import { log } from "./util/log.js";
 
@@ -27,9 +27,16 @@ program
   .option("-c, --conventions <path>", "path to a repo conventions file")
   .option("-o, --out <dir>", "output directory for generated code", "out")
   .option("-r, --max-rounds <n>", "max review→fix rounds", "2")
+  .option("-p, --provider <id>", "LLM provider: anthropic | openai | gemini")
+  .option("-m, --model <id>", "model id (defaults to the provider's best model)")
+  .option("-k, --api-key <key>", "API key (falls back to the provider env var)")
   .action(async (opts) => {
     try {
-      const cfg = loadConfig();
+      const cfg = loadConfig({
+        provider: opts.provider,
+        model: opts.model,
+        apiKey: opts.apiKey,
+      });
 
       const featureRequest = await fs.readFile(opts.feature, "utf8");
       const design = opts.design
@@ -39,17 +46,10 @@ program
         (await readTextIfExists(opts.conventions)) ??
         "No conventions file provided. Use idiomatic React Native + TypeScript defaults.";
 
-      const designSummary =
-        design.summary +
-        (Object.keys(design.tokens).length
-          ? "\nTokens:\n" +
-            Object.entries(design.tokens)
-              .slice(0, 60)
-              .map(([k, v]) => `  ${k}: ${v}`)
-              .join("\n")
-          : "");
+      const designSummary = buildDesignSummary(design);
 
       log.dim(chalk.bold("\nAgentic SDLC pipeline"));
+      log.dim(`  provider: ${cfg.provider}`);
       log.dim(`  model:   ${cfg.model}`);
       log.dim(`  feature: ${path.resolve(opts.feature)}`);
       log.dim(`  output:  ${path.resolve(opts.out)}`);
